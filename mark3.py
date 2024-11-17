@@ -6,7 +6,7 @@ from ultralytics import YOLO
 
 
 class YOLOTruckDetector:
-    def __init__(self, weights_path='directory/model.pt', video_source=0):
+    def __init__(self, weights_path='directory model', video_source=0):
         # Inisialisasi YOLO model
         print("Loading YOLOv11-S model...")
         self.model = YOLO(weights_path)
@@ -28,7 +28,7 @@ class YOLOTruckDetector:
         self.pixels_per_meter = None
 
         # Confidence threshold untuk deteksi
-        self.conf_thres = 0.10
+        self.conf_thres = 0.50
 
     def enhance_night_image(self, frame):
         """Meningkatkan visibility gambar malam"""
@@ -165,8 +165,8 @@ class YOLOTruckDetector:
 def main():
     # Initialize detector with YOLO weights and video source
     detector = YOLOTruckDetector(
-        weights_path='directory/model.pt',
-        video_source='directory/video.mp4'
+        weights_path='directory model',
+        video_source='directory video'
     )
 
     # Run detection
