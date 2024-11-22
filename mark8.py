@@ -30,7 +30,7 @@ class YOLOTruckDetector:
         self.pixels_per_meter = None
 
         # Confidence threshold untuk deteksi
-        self.conf_thres = 0.3
+        self.conf_thres = 0.4
 
         # Threshold jarak (dalam meter)
         self.distance_threshold = 100.0
