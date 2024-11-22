@@ -8,7 +8,7 @@ from collections import defaultdict
 
 
 class YOLOTruckDetector:
-    def __init__(self, weights_path, video_source=0):
+    def __init__(self, weights_path='/Users/gunawan/dev/pythonapp/computer_vision/truck_detection/yolo_v11/bestv3.pt', video_source=0):
         # Inisialisasi YOLO model
         print("Loading YOLOv11-S model...")
         self.model = YOLO(weights_path)
@@ -18,8 +18,8 @@ class YOLOTruckDetector:
         self.cap = cv2.VideoCapture(video_source)
 
         # Set resolusi kamera (opsional)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
         # Dimensi truk tambang (dalam meter)
         self.truck_length = 11.0
@@ -55,26 +55,6 @@ class YOLOTruckDetector:
         self.min_speed = 0.0
         self.max_speed = 60.0
 
-        # Parameter untuk tracking kecepatan
-        self.speed_params = {
-            'history_size': 10,          # Jumlah posisi untuk rata-rata
-            'min_positions': 3,          # Minimum posisi untuk mulai menghitung
-            'smoothing_factor': 0.3,     # Faktor smoothing (0-1)
-            'update_interval': 0.5,      # Interval update dalam detik
-            'max_speed_change': 5.0,     # Km/h per detik
-            'min_movement': 0.5,         # Meter, minimum pergerakan untuk dihitung
-            'direction_threshold': 15,    # Derajat, threshold untuk perubahan arah
-        }
-
-        # Struktur data untuk tracking
-        self.truck_tracker = defaultdict(lambda: {
-            'positions': [],      # List of (x, y, time)
-            'speeds': [],         # List of historical speeds
-            'direction': None,    # Current direction in degrees
-            'last_update': 0,     # Last speed update timestamp
-            'acceleration': 0,    # Current acceleration in m/s²
-        })
-
     def enhance_night_image(self, frame):
         """Meningkatkan visibility gambar malam"""
         lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -89,99 +69,72 @@ class YOLOTruckDetector:
         return enhanced_bgr
 
     def calculate_speed(self, truck_id, current_pos, current_time):
-        """
-        Calculate vehicle speed with improved accuracy and smoothing
-        Returns: (speed, direction, acceleration)
-        """
+        """Hitung kecepatan objek dalam km/h dengan smoothing yang lebih baik"""
         if not self.pixels_per_meter:
-            return 0.0, None, 0.0
+            return 0.0
 
-        tracker = self.truck_tracker[truck_id]
+        prev_data = self.prev_positions[truck_id]
 
-        # Add new position to history
-        tracker['positions'].append(
-            (current_pos[0], current_pos[1], current_time))
+        # Tambahkan posisi dan waktu baru ke history
+        prev_data['positions'].append(current_pos)
+        prev_data['times'].append(current_time)
 
-        # Keep only recent history
-        while len(tracker['positions']) > self.speed_params['history_size']:
-            tracker['positions'].pop(0)
+        # Batasi ukuran history
+        if len(prev_data['positions']) > self.position_history_size:
+            prev_data['positions'].pop(0)
+            prev_data['times'].pop(0)
 
-        # Check if we have enough data
-        if len(tracker['positions']) < self.speed_params['min_positions']:
-            return 0.0, None, 0.0
+        # Cek apakah sudah waktunya update kecepatan
+        if truck_id not in self.last_speed_update:
+            self.last_speed_update[truck_id] = current_time
 
-        # Check if it's time to update
-        time_since_update = current_time - tracker['last_update']
-        if time_since_update < self.speed_params['update_interval']:
-            return self.truck_speeds[truck_id], tracker['direction'], tracker['acceleration']
+        time_since_last_update = current_time - \
+            self.last_speed_update[truck_id]
 
-        # Calculate speed using multiple position samples
-        speeds = []
-        directions = []
+        # Hanya update kecepatan setelah interval tertentu
+        if time_since_last_update < self.speed_update_interval:
+            return self.truck_speeds[truck_id]
 
-        for i in range(len(tracker['positions']) - 1):
-            pos1 = tracker['positions'][i]
-            pos2 = tracker['positions'][i + 1]
+        # Hitung kecepatan hanya jika memiliki cukup history
+        if len(prev_data['positions']) >= 2:
+            # Gunakan posisi rata-rata untuk mengurangi noise
+            start_pos = np.mean(prev_data['positions'][:2], axis=0)
+            end_pos = np.mean(prev_data['positions'][-2:], axis=0)
 
-            # Calculate displacement
-            dx = pos2[0] - pos1[0]
-            dy = pos2[1] - pos1[1]
-            pixel_distance = np.sqrt(dx*dx + dy*dy)
+            # Hitung jarak dalam meter
+            pixel_distance = distance.euclidean(start_pos, end_pos)
             distance_meters = pixel_distance / self.pixels_per_meter
 
-            # Skip if movement is too small (might be noise)
-            if distance_meters < self.speed_params['min_movement']:
-                continue
+            # Hitung waktu dalam detik
+            time_diff = prev_data['times'][-1] - prev_data['times'][0]
 
-            # Calculate direction
-            direction = np.degrees(np.arctan2(dy, dx))
-            directions.append(direction)
+            if time_diff > 0:
+                # Hitung kecepatan dalam km/h
+                speed_ms = distance_meters / time_diff
+                new_speed = speed_ms * 3.6  # Convert m/s to km/h
 
-            # Calculate time difference
-            dt = pos2[2] - pos1[2]
-            if dt > 0:
-                speed_ms = distance_meters / dt
-                speeds.append(speed_ms * 3.6)  # Convert to km/h
+                # Terapkan batas perubahan kecepatan
+                if truck_id in self.truck_speeds:
+                    prev_speed = self.truck_speeds[truck_id]
+                    max_change = self.max_speed_change * time_since_last_update
+                    speed_change = new_speed - prev_speed
 
-        if not speeds:
-            return self.truck_speeds[truck_id], tracker['direction'], tracker['acceleration']
+                    if abs(speed_change) > max_change:
+                        new_speed = prev_speed + \
+                            (max_change if speed_change > 0 else -max_change)
 
-        # Calculate average speed and direction
-        new_speed = np.median(speeds)  # Use median to remove outliers
-        new_direction = np.median(directions)
+                # Terapkan batas minimum dan maximum
+                new_speed = np.clip(new_speed, self.min_speed, self.max_speed)
 
-        # Check if direction changed significantly
-        if tracker['direction'] is not None:
-            direction_change = abs(new_direction - tracker['direction'])
-            if direction_change > self.speed_params['direction_threshold']:
-                # Reduce speed estimate during turns
-                new_speed *= 0.8
+                # Aplikasikan smoothing
+                if truck_id in self.truck_speeds:
+                    new_speed = (self.speed_smoothing_factor * new_speed +
+                                 (1 - self.speed_smoothing_factor) * self.truck_speeds[truck_id])
 
-        # Apply speed limits and smoothing
-        if truck_id in self.truck_speeds:
-            prev_speed = self.truck_speeds[truck_id]
-            max_change = self.speed_params['max_speed_change'] * \
-                time_since_update
+                self.truck_speeds[truck_id] = new_speed
+                self.last_speed_update[truck_id] = current_time
 
-            # Calculate acceleration
-            speed_change = new_speed - prev_speed
-            tracker['acceleration'] = speed_change / time_since_update
-
-            # Limit speed change
-            if abs(speed_change) > max_change:
-                new_speed = prev_speed + \
-                    (max_change if speed_change > 0 else -max_change)
-
-            # Apply smoothing
-            new_speed = (self.speed_params['smoothing_factor'] * new_speed +
-                         (1 - self.speed_params['smoothing_factor']) * prev_speed)
-
-        # Update tracker
-        tracker['direction'] = new_direction
-        tracker['last_update'] = current_time
-        self.truck_speeds[truck_id] = new_speed
-
-        return new_speed, new_direction, tracker['acceleration']
+        return self.truck_speeds[truck_id]
 
     def detect_trucks(self, frame):
         """Deteksi truk menggunakan YOLO"""
@@ -394,8 +347,8 @@ class YOLOTruckDetector:
 def main():
     # Initialize detector with YOLO weights and video source
     detector = YOLOTruckDetector(
-        weights_path='model',
-        video_source='video'
+        weights_path='/Users/gunawan/dev/pythonapp/computer_vision/truck_detection/yolo_v11/bestv3.pt',
+        video_source='/Users/gunawan/dev/pythonapp/computer_vision/truck_detection/yolo_v11/1109.mp4'
     )
 
     # Run detection

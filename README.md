@@ -11,6 +11,9 @@ history :
 7. mark6.py = model sudah di update dengan hanya menampilkan jarak jika dibawah 50 meter
 8. mark7.py = menghilangkan track history agar tidak ada garis-garis jika sudah selesai terdetect
 
+== NOTE ==
+semua model sekarang namanya mark.py hanya update per commit
+
 Note :
 
 - pastikan sudah terinstall python pada machine yang ingin dijalankan
