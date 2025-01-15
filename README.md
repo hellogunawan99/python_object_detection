@@ -27,3 +27,11 @@ jalankan program :
 - buat virtual environtment (python -m venv nama_venv_bebas)
 - run di terminal (pip install -r requirements.txt)
 - running tiap program berdasarkan kebutuhan masing-masing seperti mark - mark5
+
+
+15-01-2025
+- ada 3 file update baru
+    :
+        - check_gpu.py untuk check gpu yang tersedia
+        - cpu.py computer vision jalan di cpu
+        - gpu.py computer vision jalan di gpu
